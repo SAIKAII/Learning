@@ -35,5 +35,22 @@
       typename Base<T>::Nested temp;
       ...
     }
-  }
+  };
   ```
+- 内联操作发送与预处理(预编译)阶段，即处理带“#”前缀的语句那个阶段。
+- 带有继承关系的B，D两类型分别具现化某个模板，产生出来的两个具现体并不带有继承关系。如下：
+  Top <- Middle <- Bottom
+  ```C++
+  template<typename T>
+  class SmartPtr{
+  public:
+    explicit SmartPtr(T* realPtr);
+    ...
+  };
+  SmartPtr<Top> pt1 = SmartPtr<Middle>(new Middle); //将SmartPtr<Middle>
+                                                    //转换为SmartPtr<Top>
+  SmartPtr<Top> pt2 = SmartPtr<Bottom>(new Bottom); //同上
+  SmartPtr<const Top> pct2 = pt1;                   //非常量转换为常量
+  ```
+  以上都是不行的，如果把以上的模拟模板智能指针改成普通的指针倒是完全没问题。上面都是具现化SmartPtr模板，所以`SmartPtr<Top>`和`SmartPtr<Middle>`之间并没有什么继承关系，只是两个不相干的类而已，这就造成了看似派生类的对象却无法转换成基类对象的情况。
+- 在template实参推导过程中从不将隐式类型转换函数(non-explicit的构造函数)纳入考虑。
