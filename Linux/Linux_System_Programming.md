@@ -201,6 +201,109 @@ mode可选字符串：
 - 块缓冲：缓冲以块为单位执行。适用于文件。
 
 - int setvbuf(FILE* stream, char* buf, int mode, size_t size);mode为以下值：
-  1. _IONBF 无缓冲
-  2. _IOLBF 行缓冲
-  3. _IOFBF 块缓冲
+  1. *_IONBF* 无缓冲
+  2. *_IOLBF* 行缓冲
+  3. *_IOFBF* 块缓冲
+
+### 线程安全
+标志I/O函数本质上是线程安全的。在内部实现中，设置了一把锁，一个锁计数器，和为每个打开的流创建的所有者线程。一个线程要想执行任何I/O请求，必须首先获得锁而且称为所有者线程。
+
+#### 手动文件加锁
+- void flockfile(FILE* stream);等待流被加锁，然后获得锁，增加锁计数，成为流的所有者线程。
+- void funlockfile(FILE* stream);减少与流相关的锁计数。
+- int ftrylockfile(FILE* stream);该函数为flockfile的非堵塞版本。
+
+## 高级文件I/O
+### 散布/聚集I/O
+散布聚集I/O是一种可以在单次系统调用中操作多个缓冲区的I/O方法，可以将单个数据流的内容写到多个缓冲区，或者把单个数据流读到多个缓冲区中。
+- sszie_t readv(int fd, const struct iovec* iov, int count);从fd读取count个segment到iov描述的缓冲区中。
+- ssize_t writev(int fd, const struct iovec* iov, int count);从iov描述的缓冲区中读取count个segment的数据并写入fd中。
+
+每个iovec结构体描述一个独立的缓冲区，我们称其为段。
+```C
+struct iovec{
+  void* iov_base;
+  size_t iov_len;
+};
+```
+
+### epoll
+- int epoll_create(int size);创建一个epoll上下文。size参数告诉内核需要监听的文件描述符数目，但不是最大值。
+- int epoll_ctl(int epfd, int op, int fd, struct epoll_event* event);可以向指定的epoll上下文中加入或删除文件描述符。
+
+```C
+struct epoll_event{
+  __ u32 events;
+  union{
+    void* ptr;
+    int fd;
+    __ u32 u32;
+    __ u64 u64;
+  }data;
+};
+```
+
+epoll_ctl()成功调用将关联epoll实例和epfd。参数op指定对fd要进行的操作。event参数描述epoll更具体的行为。
+
+op有效值：
+- EPOLL_CTL_ADD：把fd指定的文件添加到epfd指定的epoll实例监听集中，监听event中定义的事件。
+- EPOLL_CTL_DEL：把fd指定的文件从epfd指定的epoll监听集中删除。
+- EPOLL_CTL_MOD：使用event改变在已有fd上的监听行为。
+
+epoll_event结构体中的events参数列出了在给定文件描述符上监听的事件。多个事件可以使用位或运算同时指定。以下为有效值：
+- EPOLLERR：文件出错。即使没有设置，这个事件也是被监听的。
+- EPOLLET：在监听文件上开启边沿触发。默认行为是水平触发。
+- EPOLLHUP：文件被挂起。即使没有设置，这个事件也是被监听的。
+- EPOLLIN：文件未阻塞，可读。
+- EPOLLONESHOT：在一次事件产生并被处理之后，文件不再被监听。必须使用EPOLL_CTL_MOD指定新的事件，以便重新监听文件。
+- EPOLLOUT：文件未阻塞，可写。
+- EPOLLPRI：高优先级的带外数据可读。
+
+epoll_event中的data字段由用户使用。确认监听事件之后，data会被返回给用户。通常将event.data.fd设定为fd，这样就可以知道哪个文件描述符触发事件。
+
+- int epoll_wait(int epfd, struct epoll_event* events, int maxevents, int timeout);等待给定epoll实例关联的文件描述符上的事件。
+
+#### 边沿触发事件和水平触发事件
+如果epoll_ctl()的参数event中的events项设置为EPOLLET，fd上的监听称为边沿触发，相反的称为水平触发。区别可用以下情况解释：
+1. 生产者向管道写入1kb数据
+2. 消费者在管道上调用epoll_wait()，等待pipe出现数据，从而可读。
+
+对于水平触发的监听，在步骤2里对epoll_wait()的调用将立即返回，以表明pipe可读。对于边沿触发的监听，这个调用直到步骤1发生后才会返回。也就是说，即使调用epoll_wait()时管道已经可读，调用仍然会等待直到有数据**再次**写入，之后返回。边沿触发需要一个不同的方式来写程序，通常利用非阻塞I/O，并需要仔细检查EAGAIN。
+
+### 存储映射
+- void* mmap(void* addr, size_t len, int prot, int flags, int fd, off_t offset);请求内核将fd表示的文件中从offset处开始的len个字节数据映射到内存中。如果包含了addr，表明优先使用addr为内存中的开始地址。访存权限由prot指定，flags指定了其他的操作行为。
+
+prot参数描述了对内存区域所请求的访问权限。如果是PROT_NONE，此时映射区域无法访问，也就是以下标志位的比特位的或运算值：
+- PROT_READ 页面可读
+- PROT_WRITE  页面可写
+- PROT_EXEC 页面可执行
+
+flags参数描述了映射的类型和一些行为。其值为以下值按二进制或运算的值：
+- MAP_FIXED 告诉mmap()把addr看做强制性要求，而不是建议。
+- MAP_PRIVATE 映射区不共享。文件映射采用了写时拷贝，进程对内存的任何改变不影响真正的文件或者其他进程的映射。
+- MAP_SHARED  和所有其他映射该文件的进程共享映射内存。对内存的写操作等效于写文件。读该映射区域会受到其他进程的写操作的影响。
+
+mmap()调用操作页。addr和offset参数都必须按页大小对齐。也就是说，它们必须是页大小的整数倍。
+
+- int munmap(void* addr, size_t len);取消mmap()映射。
+
+mmap()优点：
+- 使用read()或write()系统调用需要从用户缓冲区进行数据读写，而使用映射文件进行操作，可以避免多余的数据拷贝。
+- 除了潜在的页错误，读写映射文件不会带来系统调用和上下文切换的开销。就像直接操作内存一样简单。
+- 当多个进程映射同一个对象到内存中，数据在进程间共享。只读和写共享的映射在全体中都是共享的；私有可写的尚未进行写时拷贝的页是共享的。
+- 在映射对象中搜索只需要一般的指针操作。而不必使用lseek()。
+
+mmap()缺陷：
+- 映射区域的大小通常是页大小的整数倍。因此，映射文件大小与页大小的整数倍之间有空间浪费。
+- 存储映射区域必须在进程地址空间内。对于32位的地址空间，大量的大小各异的映射会导致大量的碎片出现，使得很难找到连续的大片空内存。
+- 创建和维护映射以及相关的内核数据结构有一定的开销。通过上节提到的消除读写时的不必要拷贝的，这些开销可以忽略，对于大文件和频繁访问的文件更是如此。
+
+- void* mremap(void* addr, size_t old_size, size_t new_size, unsigned long flags);扩大或减少已有映射的大小。
+- int mprotect(const void* addr, size_t len, int prot);改变映射区域的权限。
+
+- int msync(void* addr, size_t len, int flags);可以将mmap()生成的映射在内存中的任何修改回写到磁盘，达到同步内存中的映射和被映射的文件的目的。不调用msync()，无法保证在映射取消前，修改过的映射会被写回到硬盘。这一点与write()不同。
+
+flags参数：
+- MS_ASYNC  指定同步操作是异步发生的。更新操作由系统调度，msync()会立即返回，不用等待write()操作完成。
+- MS_INVALIDATE 指定该块映射的其他所有拷贝都将失效。未来对该文件任意映射的操作将直接同步到磁盘。
+- MS_SYNC 指定同步操作必须同步进行。
