@@ -307,3 +307,72 @@ flags参数：
 - MS_ASYNC  指定同步操作是异步发生的。更新操作由系统调度，msync()会立即返回，不用等待write()操作完成。
 - MS_INVALIDATE 指定该块映射的其他所有拷贝都将失效。未来对该文件任意映射的操作将直接同步到磁盘。
 - MS_SYNC 指定同步操作必须同步进行。
+
+### 进程
+空闲进程——当没有其他进程在运行时，内核所运行的进程——它的pid是0。在启动后，内核运行的第一个进程称为init进程，它的pid是1。
+
+#### 获得进程ID和父进程ID
+- pid_t getpid(void);
+- pid_t getppid(void);
+
+#### exec系列系统调用
+execl()成功的调用不仅仅改变了地址空间和进程的映像，还改变了进程的一些属性：
+- 任何挂起的信号都会丢失
+- 捕捉的任何信号会还原为缺省的处理方式，因为信号处理函数以及不存在于地址空间中了
+- 任何内存的锁定会丢失
+- 多数线程的属性会还原到缺省值
+- 多数关于进程的统计信息会复位
+- 与进程内存相关的任何数据都会丢失，包括映射的文件
+- 包括C语言库的一些特性等独立存在于用户空间的数据都会丢失
+
+exec系列：
+- int execl(const char* path, const char* arg, ...);
+- int execlp(const char* file, const char* arg, ...);
+- int execle(const char* path, const char* arg, ..., char* const envp[]);
+- int execv(const char* path, char* const argv[]);
+- int execvp(const char* file, char* const argv[]);
+- int execve(const char* filename, cahr* const argv[], char* const envp[]);
+
+字母l和v分别代表参数是以列表方式或者数组方式提供的。字母p意味着在用户的PATH环境变量中寻找可执行文件。e表示会提供给新进程以新的环境变量。无论是列表还是数组，最后都是以NULL结尾。
+
+#### fork系统调用
+- pid_t fork(void);
+
+注意：
+- 子进程的pid是新分配的，与父进程不同
+- 子进程的ppid会设置为父进程的pid
+- 子进程中的资源统计信息会清零
+- 任何挂起的信号会清除，不会被子进程继承
+- 任何文件所都不会被子进程所继承
+
+#### vfork系统调用
+- pid_t vfork(void);除了子进程必须要立刻执行一次对exec的系统调用，或者调用_exit()退出，对vfork()的成功调用所产生的结果和fork()是一样的。vfork()会挂起父进程直到子进程终止或者运行了一个新的可执行文件的映像。通过这种方式，vfork()避免了地址空间的按页复制。在这个过程中，父进程和子进程共享相同的地址空间和页表项。实际上vfork()只完成了一件事：复制内部的内核数据结构。因此，子进程也就不能修改地址空间中的任何内存。
+
+#### 终止进程
+- void exit(int status);对exit()的调用通常会执行一些基本的终止进程的步骤，然后通知内核终止这个进程。
+
+在终止进程之前，C语言函数执行以下关闭进程的工作：
+1. 以在系统中注册的逆序来调用有atexit()或on_exit()注册的函数
+2. 关闭所有已打开的标准I/O流
+3. 删除由tmpfile()创建的所有临时文件
+
+这些步骤完成了在用户空间中所需要做的事情，这样exit()就可以调用_exit()来让内核来处理终止进程的剩余工作了。
+
+#### atexit()
+- int atexit(void (* function)(void));用于注册一些在进程结束时要调用的函数。
+
+#### on_exit()
+- int on_exit(void (* function)(int, void*), void* arg);工作方式和atexit()一样，只是注册的函数原型不同。
+
+#### 等待终止的子进程
+- pid_t wait(int* status);返回已终止子进程的pid，或者返回-1表示出错(没有创建过子进程)。如果status不是NULL，那么它包含了一些关于子进程的附加信息。与该函数相关的宏有：
+  - int WIFEXITED(status);
+  - int WIFSIGNALED(status);
+  - int WIFSTOPPED(status);
+  - int WIFCONTINUED(status);
+  - int WEXITSTATUS(status);
+  - int WTERMSIG(status);
+  - int WSTOPSIG(status);
+  - int WCOREDUMP(status);
+
+- pid_t waitpid(pid_t pid, int* status, int options);
