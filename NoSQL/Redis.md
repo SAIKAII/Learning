@@ -765,3 +765,22 @@ Redis的原子性仅仅作用于那些事务中的某个命令因为语法错误
 
 #### 耐久性
 因为Redis的事务不过是简单地用队列包裹起了一组Redis命令，Redis并没有为事务提供任何额外的持久化功能，所以Redis事物的耐久性由Redis所使用的持久化模式决定。
+
+## 排序
+sort命令
+
+### 选项的执行顺序
+1. 排序：在这一步，命令会使用ALPHA、ASC或DESC、BY这几个选项，对输入键进行排序，并得到一个排序结果集。
+2. 限制排序结果集的长度：在这一步，命令会使用LIMIT选项，对排序结果集的长度进行限制，只有LIMIT选项指定的那部分元素会被保留在排序结果集中。
+3. 获取外部键：在这一步，命令会使用GET选项，根据排序结果集中的元素，以及GET选项指定的模式，查找并获取指定键的值，并用这些值来作为新的排序结果集。
+4. 保存排序结果集：在这一步，命令会使用STORE选项，将排序结果集保存到指定的键上面去。
+5. 向客户端返回排序结果集：在最后一步，命令遍历排序结果集，并依次向客户端返回排序结果集中的元素。
+
+除了GET选项呢之外，改变选项的摆放顺序并不影响SORT命令执行这些选项的顺序。当有多个GET选项时，GET选项之间的前后位置不能改变，否则会产生不同的结果集。
+
+SORT <key> ALPHA DESC BY <by-pattern> LIMIT <offset> <count> GET <get-pattern> STORE <store_key>与命令
+SORT <key> LIMIT <offset> <count> BY <by-pattern> ALPHA GET <get-pattern> STORE <store_key> DESC 以及命令
+SORT <key> STORE <store_key> DESC BY <by-pattern> GET <get-pattern> ALPHA LIMIT <offset> <count>都产生完全相同的结果集。
+
+## 位数组
+Redis使用字符串对象来表示位数组，因为字符串对象使用的SDS数据结构是二进制安全的，所以程序可以直接使用SDS结构来保存位数组，并使用SDS结构的操作函数来处理位数组。
