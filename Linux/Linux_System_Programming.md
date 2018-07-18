@@ -376,3 +376,161 @@ exec系列：
   - int WCOREDUMP(status);
 
 - pid_t waitpid(pid_t pid, int* status, int options);
+
+#### 实际用户ID、有效用户ID和保存设置的用户ID
+实际上，与进程相关的用户ID有四个而不是一个，它们是：实际用户ID、有效用户ID、保存设置的用户ID和文件系统用户ID。
+
+实际用户ID是运行这个进程的那个用户的uid。
+
+有效用户ID是当前进程所使用的用户ID。权限验证一般是使用这个值。初始时，这个ID等于实际用户ID。因为创建进程时，子进程会继承父进程的有效用户ID。更进一步的讲，exec系统调用不会改变有效用户ID。但是在exec调用过程中，实际用户ID和有效用户ID的主要区别出现了：通过setuid(suid)程序，进程可以改变自己的有效用户ID。准确的说，有效用户ID被设置为拥有此程序文件拥有者的用户ID。
+
+保存设置的用户ID是进程原先的有效用户ID。当创建进程时，子进程会从父进程继承保存设置的用户ID。
+
+有效用户ID的作用是：它是在检查进程权限过程中使用的用户ID。实际用户ID和保存设置的用户ID像是代理或者一个潜在的用户ID值，它的作用是允许非root进程在这些用户ID之间互相切换。实际用户ID是真正运行程序的有效用户id。保存设置的用户ID是在执行suid程序前的有效用户id。
+
+### 会话和进程组
+每个进程都属于某个进程组。进程组是由一个或多个相互间有关联的进程组成的，它的目的是为了进行作业控制。进程组的主要特征就是信号可以发送给进程组中的所有进程：这个信号可以使同一个进程组中的所有进程终止、停止或者继续运行。每个进程组都由进程组ID唯一标识，该ID就是组长进程的pid。
+
+当有新的用户登陆计算机，登陆进程就会为这个用户创建一个新的会话。这个会话中只有用户的登陆shell一个进程。登陆shell作为会话首进程。会话首进程的pid就被作为会话的ID。一个会话就是一个或多个**进程组**的集合。会话中的进程组分为一个前台进程组和零个或多个后台进程组。
+
+#### 创建会话
+- pid_t setsid(void);假如调用进程不是某个进程组组长进程，调用setsid()会创建新的会话。调用进程就是这个会话的唯一进程，也是新会话的首进程，但是它没有控制终端。调用也同时在这个会话中创建一个进程组，调用进程成为了组长进程，也是进程组中的唯一进程。新会话ID和进程组ID被设置为调用进程的pid。
+
+这对守护进程来说十分有用，因为它不想是任何已存在会话的成员，也不想拥有控制终端。
+
+#### 守护进程
+守护进程运行在后台，不与任何控制终端相关联。守护进程通常在系统启动时就运行，它们以root用户运行或者其他特殊的用户，并处理一些系统级的任务。
+
+对于守护进程有两个基本要求：它必须是init进程的子进程，并且不与任何控制终端相关联。
+
+进程称为守护进程的步骤：
+1. 调用fork()，创建新的进程，它会是将来的守护进程。
+2. 在守护进程的父进程中调用exit()。这保证了祖父进程确认父进程已经结束。还保证了父进程不再继续运行，守护进程不是组长进程。最后这一点是顺利完成以下步骤的前提。
+3. 调用setsid()，使得守护进程有一个新的进程组和新的会话，两者都把它作为首进程。这也保证它不会与控制终端相关联。
+4. 用chdir()将当前工作目录改为根目录。因为前面调用fork()创建了新进程，它所继承来的当前工作目录可能在文件系统中任何地方。而守护进程通常在系统启动时运行，同时不希望一些随机目录保持打开状态，造成阻止管理员卸载守护进程工作目录所在的那个文件系统。
+5. 关闭所有的文件描述符。不需要继承任何打开的文件描述符，对于无法确认的文件描述符，让它们继续处于打开状态。
+6. 打开0、1和2号文件描述符，把它们重定向到/dev/null。
+
+- int daemon(int nochdir, int noclose);用于简化工作。如果nochdir非零，就不会改变工作目录。如果noclose非零，就不关闭所有打开的文件描述符。
+
+### 进程调度
+#### nice()
+- int nice(int inc);成功调用nice()将在现有优先级上增加inc，并返回新值。只有拥有CAP_SYS_NICE能力(实际上，就是root所有的进程)才能够使用负值inc，减少友好度，增加优先级。因此，非root进程只能降低优先级(增加inc值)。
+
+#### getpriority()和setpriority()
+- int getpriority(int which, int who);
+- int setpriority(int which, int who, int prio);
+
+“which”的取值为PRIO_PROCESS、PRIO_PGRP或者PRIO_USER，对应地，“who”就说明了进程ID，进程组ID或者用户ID。当“who”是0的时候，分别是当前进程，当前进程组或者当前用户。
+
+getpriority()返回指定进程中的最高优先级(nice值最小)，setpriority()则将所有进程的优先级都设为“prio”。同nice()一样，只有拥有CAP_SYS_NICE能力的进程能够提高一个进程的优先级(降低nice值)，更进一步地说，只有这样的进程才能调整不属于当前用户的进程的优先级。
+
+### 资源限制
+Linux提供了两个操作资源限制的系统调用。
+
+```C
+struct rlimit{
+  rlim_t rlim_cur;  //soft limit
+  rlim_t rlim_max;  //hard limit
+};
+```
+- int getrlimit(int resource, struct rlimit* rlim);
+- int setrlimit(int resource, const struct rlimit* rlim);
+
+一般用类似RLIMIT_CPU的整数常量表示资源，rlimit结构表示实际限制。结构定义了两个上上限：软限制和硬限制。内核对进程强制施行软限制，但进程自身可以修改软限制，可以是0到硬限制之间的任意值。不具备CAP_SYS_RESOURCE能力的进程(比如，非root进程)，只能调低硬限制。
+
+15种资源限制：
+- RLIMIT_AS 进程地址空间上限，单位是字节。
+- RLIMIT_CORE 内存转储文件大小的最大值，单位是字节。
+- RLIMIT_CPU  一个进程可以使用的最长CPU时间，单位是秒。
+- RLIMIT_DATA 进程数据段和堆的大小，单位是字节。
+- RLIMIT_FSIZE  进程可以创建的最大文件，单位是字节。
+- RLIMIT_LOCKS  进程可以拥有的文件锁的最大数量。
+- RLIMIT_MENLOCK  不具有CAP_SYS_IPC能力的进程通过mlock()，mlockall()或者shmctl()能锁定的最多内存的字节数。
+- RLIMIT_MSGQUEUE 用户可以在POXIS消息队列中分配的最多字节。
+- RLIMIT_NICE 进程可以降低nice值(提升优先级)的最大值。
+- RLIMIT_NOFILE 该值比进程可以打开的最多文件数大一。
+- RLIMIT_NPORC  系统任意时刻允许的最多进程数。
+- RLIMIT_RSS  进程可以驻留在内存中的最多页数。
+- RLIMIT_RTPRIO 没有CAP_SYS_NICE能力的进程可以拥有的最大实时优先级。
+- RLIMIT_SIGPENDING 用户消息队列中最多信号数。
+- RLIMIT_STACK  栈的最大字节长度。
+
+### 文件及其元数据
+每个文件均对应一个inode，它是由文件系统中唯一数值编址。inode存储了与文件有关的元数据，例如文件的访问权限，最后访问时间，所有者，群组，大小以及文件数据的存储位置。
+
+#### 一组stat函数
+- int stat(const char* path, struct stat* buf);
+- int fstat(int fd, struct stat* buf);
+- int lstat(const char* path, struct stat* buf);
+
+```C
+struct stat{
+  dev_t st_dev; //ID of device containing file
+  ino_t st_ino; //inode number
+  mode_t st_mode; //permissions
+  nlink_t st_nlink; //number of hard links
+  uid_t st_uid; //user ID of owner
+  gid_t st_gid; //group ID of owner
+  dev_t st_rdev;  //device ID
+  off_t st_size;  //total size in bytes
+  blksize_t st_blksize; //blocksize for filesystem I/O
+  blkcnt_t st_blocks; //number of blocks allocated
+  time_t st_atime;  //last access time
+  time_t st_mtime;  //last modification time
+  time_t st_ctime;  //last status change time
+};
+```
+
+stat()返回由路径path参数指明的文件信息，而fstat()返回由文件描述符fd指向的文件信息。lstat()与stat()类似，但是对于符号链接，lstat()返回链接本身而非目标文件。
+
+#### 权限
+- int chmod(const char* path, mode_t mode);
+- int fchmod(int fd, mode_t mode);
+
+#### 所有权
+- int chown(const char* path, uid_t owner, gid_t group);
+- int lchown(const char* path, uid_t owner, gid_t group);
+- int fchown(int fd, uid_t owner, gid_t group);
+
+chown()和lchown()设置由路径path指定的文件的所有权。它们作用一样，除非文件是个符号链接：前者沿着符号链接并改变链接目标而不是链接本身的所有权，而lchown()并不沿着符号链接，因此只改变符号链接文件的所有权。
+
+只有具有CAP_CHOWN能力的进程(通常是root进程)可能改变文件的所有者。文件所有者可能将文件所属组设置为任何用户所属组；具有CAP_CHOWN能力的进程能改变文件所属群组为任何值。
+
+#### 扩展属性
+扩展属性提供一种永久地把文件与键/值对相关联的机制。
+
+### 目录
+在Unix，目录是个简单的概念：它包含文件名的列表，每个文件名对应一个inode编号。每个文件名称为目录项，每个名字到inode的映射称为链接。
+
+#### 获取当前工作目录
+- char* getcwd(char* buf, size_t size);成功调用getcwd()会以绝对路径名形式复制当前工作目录至buf指向的长度size字节的缓冲区，并返回一个指向buf的指针。
+
+#### 更改当前工作目录
+当用户第一次登入系统时，进程login设置其当前工作目录为在/etc/passwd指定的主目录。
+- int chdir(const char* path);
+- int fchdir(int fd);
+
+调用chdir()会更改当前工作目录为path指定的路径名，绝对或相对路径均可以。同样，调用fchdir()会更改当前工作目录为文件描述符fd指向的路径名，而fd必须是打开的目录。
+
+#### 创建目录
+- int mkdir(const char* path, mode_t mode);创建目录path，其权限位为mode(由当前umask修改)。
+
+#### 移除目录
+- int rmdir(const char* path);
+
+#### 读取目录内容
+- DIR* opendir(const char* name);创建name所指向目录的目录流。目录流比指向打开目录的文件描述符保存的内容多了一些，主要增加的是一些元数据和保存目录内容的缓冲区。
+- int dirfd(DIR* dir);返回目录流dir的文件描述符。由于目录流函数只能在内部使用该文件描述符，程序只能调用那些不操作文件位置的系统调用。
+- struct dirent* readdir(DIR* dir);从目录流读取目录项。成功调用会返回dir指向的下个目录项。结构dirent指向目录项。
+
+```C
+struct dirent{
+  ino_t d_ino;  //inode number
+  off_t d_off;  //offset to the next dirent
+  unsigned short d_reclen;  //length of this record
+  unsigned char d_type; //type of file
+  char d_name[256]; //filename
+};
+```
+- int closedir(DIR* dir);关闭由dir指向的目录流，包括目录的文件描述符。
