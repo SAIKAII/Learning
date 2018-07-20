@@ -534,3 +534,234 @@ struct dirent{
 };
 ```
 - int closedir(DIR* dir);关闭由dir指向的目录流，包括目录的文件描述符。
+
+#### 硬链接
+- int link(const char* oldpath, const char* newpath);使用link()为存在文件创建新链接。注意：inode是有最大链接数的。包含newpath的设备会建立新目录项。dentry目录项:主要包含文件名字和索引节点号,即inode。他们是一一对应的。
+
+#### 符号链接
+符号链接的不同点在于它不增加额外的目录项，而是一种特殊的文件类型。该文件包含被称为符号链接指向的其他文件的路径名。
+- int symlink(const char* oldpath, const char* newpath);
+
+#### 解除链接
+- int unlink(const char* pathname);从文件系统删除pathname。
+- int remove(const char* path);为了简化对各种类型文件的删除，C语言提供该函数。成功调用remove()会从文件系统删除path，并返回0。如果path是个文件remove()调用unlink()；如果path是个目录，remove()调用rmdir()。
+
+#### 复制
+复制的步骤：
+1. 打开src
+2. 打开dst，如果它不存在则创建，且如果存在则长度截断为零
+3. 将src数据块读至内存
+4. 将该数据块写入dst
+5. 继续操作直到src全部已读取且已写入dst
+6. 关闭dst
+7. 关闭src
+
+如果复制目录，则通过mkdir()创建该目录和所有子目录；其中的每个文件之后单独复制。
+
+#### 移动
+- int rename(const char* oldpath, const char* newpath);将路径名oldpath重命名为newpath。文件内容和inode保持不变。
+
+### 设备节点
+设备节点是应用程序与设备驱动交互的特殊文件。当应用程序在设备节点上执行一般的Unix I/O，内核以不同于普通文件I/O的方式处理这些请求。内核将该请求转交给设备驱动。设备驱动处理这些I/O操作，并向用户返回结果。设备节点提供设备抽象，使应用程序不必了解特定设备或熟悉特别的接口。
+
+内核如何识别哪些设备驱动该处理哪些请求呢？每个设备节点都具有两个数值属性，分别是主设备号和次设备号。主次设备号与对应的设备驱动映射表已载入内核。
+
+### 带外通信
+- int ioctl(int fd, int request, ...);从字面理解就是I/O控制的意思。
+
+**request是特殊请求代码，该值由内核和进程预定义，它指明对文件fd执行何种操作。**
+
+### 监视文件事件
+Linux提供为监视文件接口inotify——利用它可以监控文件的移动，读取，写入，或删除操作。假设你正在编写一个类似GNOME's Nautilus的图形化文件管理器。如果文件已复制到目录而Nautilus正在显示目录内容，则该目录在文件管理器中的视图将会不一致。通过inotify，内核能在事件发生时通知(push)应用程序。
+
+#### 初始化inotify
+在使用inotify之前，进程必须对它初始化。
+- int inotify_init(void);返回初始化实例指向的文件描述符。
+
+#### 监视
+进程初始化inotify之后，会设置监视。监视由监视描述符表示，由一个标准Unix路径和一个与之相关联的监视掩码组成。该掩码通知内核，该进程关心何种事件。
+
+inotify可以监视文件和目录。当监视目录时，inotify会报告目录本身和该目录下所有文件(但不包括监视目录子目录下的文件——监视不是递归的)的事件。
+- int inotify_add_watch(int fd, const char* path, uint32_t mask);
+
+```C
+struct inotify_event{
+  int wd; //watch descriptor
+  uint32_t mask;  //mask of events
+  uint32_t cookie;  //unique cookie
+  uint32_t len; //size of 'name' field
+  char name[];  //null-ternminated name 为了对齐，这个可能会有null字符填充
+};
+```
+
+#### 删除inotify监视
+- int inotify_rm_watch(int fd, uint32_t wd);
+
+#### 数组分配
+- void* calloc(size_t nr, size_t size);与malloc不同的是，calloc将分配的区域全部用0进行初始化。
+
+#### 调整已分配内存大小
+- void* realloc(void* ptr, size_t size);它返回一个指向新空间的指针，当试图扩大内存块的时候返回的指针**可能**不再是ptr。如果realloc不能在已有的空间上增加到size大小，那么就会另外申请一块size大小的空间，将原本的数据拷贝到新空间中，然后再将旧的空间释放。
+
+#### 对齐
+- int posix_memalign(void** memptr, size_t alignment, size_t size);调用posix_memalign()，成功时返回size字节的动态内存，并保证是按照alignment进行对齐的。参数alignment必须是2的幂，以及void指针大小的倍数。返回的内存块的地址保存在memptr里，函数返回0。
+
+非标准类型对齐规则：
+- 一个结构的对齐要求和它的成员中最大的那个类型是一样的。例如，一个结构中最大的是以4字节对齐的32bit的整形，那么这个结构至少以4字节对齐。
+- 结构体也引入了对填充的需求，以此来保证每一个成员都符合各自的对齐要求。
+
+#### 匿名内存映射
+对于较大的分配，glibc并不使用堆而是创建一个匿名内存映射来满足要求。匿名内存映射和基于文件的映射很相似，只是它并不基于文件-所以称之为“匿名”。实际上，一个匿名内存映射只是一块已经用0初始化的大的内存块，以供用户使用。因为这种映射的存储不是基于堆的，所以并不会在数据段内产生碎片。
+
+好处：
+- 无需关系碎片。当程序不再需要这块内存的时候，只要撤销映射，这块内存就直接归还给系统了。
+- 匿名存储映射的大小是可调整的，可以设置权限，还能像普通的映射一样接受建议。
+- 每个分配存在于独立的内存映射。没有必要再去管理一个全局的堆了。
+
+缺点：
+- 每个存储器映射都是页面大小的整数倍。所以，如果大小不是页面整数倍的分配会浪费大量的空间。对于较小的分配来说，空间的浪费更加显著，因为相对于使用的空间，浪费的空间将更大。
+- 创建一个新的内存映射比从堆中返回内存的负载要大，因为使用堆几乎不涉及任何内核操作。越小的分配，这样的问题也越明显。
+
+建议：比128KB小的分配由堆实现，相应地，较大的由匿名存储器映射来实现。
+
+#### 使用malloc_usable_size()和malloc_trim()调优
+- size_t malloc_usable_size(void* ptr);返回ptr指向的动态内存块的实际大小。动态存储器分配的可用空间可能比请求的大。
+- int malloc_trim(size_t padding);强制glibc归还所有的可释放的动态内存给内核。调用成功时，数据段会尽可能地收缩，但是填充字节被保留下来。
+
+#### 基于栈的分配
+- void* alloca(size_t size);成功时返回一个指向size字节大小的内存指针。这块内存是在栈中的，当调用它的函数返回时，这块内存将被自动释放。
+
+#### 内存锁定
+Linux实现了请求页面调度，页面调度是说在需要时将页面从硬盘交换进来，当不再需要时再交换出去。
+- int mlock(const void* addr, size_t len);锁定addr开始长度为len个字节的虚拟内存。成功调用会将所有包含[addr, addr+len)的物理内存**页**锁定。例如，一个调用只是指定了一个字节，包含这个字节的所有物理页都将被锁定。POSIX标准要求addr应该与页边界对齐。Linux并没有强制要求，如果真要这样做的时候，会悄悄的将addr向下调整到最近的页面。对于要求可移植到其他系统的程序需要保证addr是页对齐的。
+
+一个由fork()产生的子进程并不从父进程处继承锁定的内存。然而，由于Linux的写时复制机制，子进程的页面被锁定在内存中直到子进程对它们执行写操作。
+
+#### 锁定全部地址空间
+- int mlockall(int flags);锁定一个进程在现有地址空间在物理内存中的所有页面。
+
+flags参数：
+- MCL_CURRENT 如果设置了该值，mlockall()会将所有**已被映射**的页面(包括栈，数据段，映射文件)锁定进程地址空间中。
+- MCL_FUTURE  如果设置了该值，mlockall()会将所有未来映射的页面也锁定到进程地址空间中。
+
+#### 内存解锁
+- int munlock(const void* addr, size_t len);
+- int munlockall(void);
+
+#### 确定页面是否在内存中
+- int mincore(void* start, size_t length, unsigned char* vec);用来确定一个给定范围内的内存是在物理内存中还是被交换到了硬盘中。
+
+调用mincore()提供了一个向量，表明调用时刻映射中哪个页面是在物理内存中。函数通过vec来返回向量，这个向量描述start(必须页面对齐)开始长为length(不需要对齐)字节的内存中的页面的情况。vec的每个字节对应指定区域内的一个页面，第一个字节对应者第一个页面，然后依次对应。因此，vec必须足够大来装入(length-1+page size)/page size字节。如果那页面在物理内存中，对应字节的最低位是1，否则是0。
+
+目前来说，这个系统调用只能用在以MAP_SHARED创建的基于文件的映射上。
+
+### 基本信号管理
+`typedef void (*sighandler_t)(int)`
+- sighandler_t signal(int signo, sighandler_t handler);一次成功的调用会移除接收signo信号的当前操作，并以handler指定的新信号处理程序代替它。进程不能捕获SIGKILL和SIGSTOP，因此给这两个信号设置处理程序是没有意义的。
+
+可以用signal()指示内核对当前的进程忽略某个指定信号，或重新设置该信号的默认操作。这可以通过使用特殊的参数值来实现：
+- SIG_DFL 将signo所表示的信号设置为默认操作。
+- SIG_IGN 忽略signo表示的信号。
+
+signal()函数返回该信号先前的操作，这是一个指向信号处理程序，SIG_DFL或SIG_IGN的指针。
+
+#### 执行与继承
+当进程第一次执行时，所有的信号都被设为默认操作，除非父进程忽略它们；在这种情况下，新创建的进程也会忽略那些信号。换句话说，在新进程中任何父进程**捕获**的信号都被重置为默认操作，所有其他的信号保持不变。
+
+### 发送信号
+- int kill(pid_t pid, int signo);从一个进程向另一个进程发送信号。
+
+通常的用法是，kill()给pid代表的进程发送信号signo。
+- 如果pid是0，signo被发送给调用进程的进程组中的每个进程。
+- 如果pid是-1，signo会向每个调用进程有权限发送信号的进程发出信号，调用进程自身和init除外。
+- 如果pid小于-1，signo被发送给进程组-pid。
+
+#### 权限
+为了给另一个进程发送信号，发送的进程需要合适的权限。有CAP_KILL权限的进程能给任何进程发送信号。如果没有这种权限，发送进程的有效的或真正的用户ID必须等于接受进程的真正的或保存的用户ID。简单的说，用户能够给他或他自己的进程发送信号。
+
+#### 给自己发送信号
+- int raise(int signo);一种简单的进程给自己发送信号的方法。
+
+#### 给整个进程组发送信号
+- int killpg(int pgrp, int signo);给特定进程组的所有进程发送信号。
+
+### 重入
+当内核发送信号时，进程可能执行到代码的任何位置。例如，进程可能正执行一个重要的操作，如果被中断，进程将会处于不一致状态。
+
+可重入函数是指可以安全的调用自身(或者从同一个进程的另一个线程)的函数。为了使函数可重入，函数决不能操作静态数据，必须只操作栈分配的数据或调用中提供的数据，不得调用任何不可重入的函数。
+
+### 信号集
+- int sigemptyset(sigset_t* set);
+- int sigfillset(sigset_t* set);
+- sigaddset(sigset_t* set, int signo);
+- int sigdelset(sigset_t* set, int signo);
+- int sigismember(const sigset_t* set, int signo);
+
+### 阻塞信号
+- int sigprocmask(int how, const sigset_t* set, sigset_t* oldset);
+
+sigprocmask()的行为取决于how的值，它是以下标识之一：
+- SIG_SETMASK 调用进程的信号掩码变成set。
+- SIG_BLOCK set中的信号被加入到调用进程的信号掩码中。
+- SIG_UNBLOCK set中的信号被从调用进程的信号掩码中移除。
+
+如果oldset是非空的，该函数将oldset设置为先前的信号集。
+
+如果set是空的，该函数忽略how，并且不改变信号掩码，但仍然设置oldset的信号掩码。
+
+#### 获取待处理信号
+- int sigpending(sigset_t* set);
+
+#### 等待信号集
+- int sigsuspend(const sigset_t* set);
+
+一般在获取已到达信号和在程序运行期间阻塞在临界区的信号时使用sigsuspend()。进程首先使用sigprocmask()来阻塞一个信号集，将旧的信号掩码保存在oldset中。退出临界区后，进程会调用sigsuspend()，将oldset赋给set。
+
+### 高级信号管理
+- int sigaction(int signo, const struct sigaction* act, struct sigaction* oldact);
+
+```C
+struct sigaction{
+  void (*sa_handler)(int);  //信号处理程序或操作
+  void (*sa_sigaction)(int, siginfo_t*, void*);
+  sigset_t sa_mask; //阻塞的信号
+  int sa_flags; //标志
+  void (*sa_restorer)(void);  //已经过时且不符合POSIX标准
+};
+
+typedef struct siginfo_t{
+  int si_signo; //信号编号
+  int si_errno; //errno值
+  int si_code;  //信号代码
+  pid_t si_pid; //发送进程的PID
+  uid_t si_uid; //发送进程的真实UID
+  int si_status;  //退出值或信号
+  clock_t si_utime; //用户时间消耗
+  clock_t si_stime; //系统时间消耗
+  sigval_t si_value;  //信号载荷值
+  int si_int; //POSIX.1b信号
+  void* si_ptr; //POSIX.1b信号
+  void* si_addr;  //造成错误的内存位置
+  int si_band;  //带事件
+  int si_fd;  //文件描述符
+};
+```
+
+### 分解时间
+```C
+struct tm{
+  int tm_sec;
+  int tm_min;
+  int tm_hour;
+  int tm_mday;
+  int tm_mon;
+  int tm_year;
+  int tm_wday;
+  int tm_yday;
+  int tm_isdst;
+#ifdef _BSD_SOURCE
+  long tm_gmtoff;
+  const char* tm_zone;
+#endif
+};
+```
