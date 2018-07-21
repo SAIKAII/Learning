@@ -765,3 +765,151 @@ struct tm{
 #endif
 };
 ```
+
+### 获取当前时间
+- time_t time(time_t* t);返回当前时间，以自从大纪元以来用秒计的流逝的秒数来表示。如果参数t非NULL，该函数也将当前时间写入到提供的指针t中。
+
+### 精度更高的获取当前时间
+- int gettimeofday(struct timeval* tv, struct timezone* tz);提供了微秒级精度支持。tz参数已经很古老，一般传NULL给tz参数。
+
+### 一个获取指定时间源的时间的高级接口
+- int clock_gettime(clockid_t clock_id, struct timespec* ts);该函数可以达到纳秒级精度。将clock_id指定的时间源的当前时间存储到ts中。
+
+### 取得进程时间
+```C
+struct tms{
+  clock_t tms_utime;  //user time consumed
+  clock_t tms_stime;  //system time consumed
+  clock_t tms_cutime; //user time consumed by children
+  clock_t tms_cstime; //system time consumed by children
+};
+```
+- clock_t times(struct tms* buf);取得正在运行的当前进程及其子进程的进程时间，进程时间以时钟报时信号表示。统计的时间分成用户和系统时间。用户时间是在用户空间执行代码所用的时间。系统时间是在内核空间执行所用的时间(例如进行系统调用或者发送一个页错误所消耗的时间)。每个子进程的耗时统计只在该子进程已经终结，且父进程对其调用了waitpid()之后才被包含进来。
+
+### 设置当前时间
+- int stime(time_t* t);调用需要发起者用于CAP_SYS_TIME权限。一般的，只有root用户才有该权限。
+
+### 高精度定时
+- int settimeofday(const struct timeval* tv, const struct timezone* tz);让tz传递NULL是不错的选择。
+
+### 设置时间的一个高级接口
+- int clock_settime(clockid_t clock_id, const struct timespec* ts);在大多数系统上，唯一可以设置的时间源是CLOCK_REALTIME。因此，这个函数比settimeofday()唯一优越之处在于提供了纳秒级精度。
+
+### 时间格式转换
+- char* asctime(const struct tm* tm);
+- char* asctime_r(const struct tm* tm, char* buf);
+
+返回一个指向静态分配的字符串的指针。之后对任何时间函数的调用都可能覆盖该字符串，asctime()不是线程安全的。asctime_t()才是线程安全，buf最少应有26个字符长度。
+
+- time_t mktime(struct tm* tm);转换tm结构体为time_t。
+
+- char* ctime(const time_t* timep);
+- char* ctime_r(const time_t* timep, char* buf);将一个time_t转换为ASCII表示。
+
+- struct tm* gmtime(const time_t* timep);
+- struct tm* gmtime_r(const time_t* timep, struct tm* 0result);将time_t转换到tm结构体。
+
+- struct tm* localtime(const time_t* timep);
+- struct tm* localtime_r(const time_t* timep, struct tm* result);将给出的time_t表示为用户时区。
+
+- double difftime(time_t time1, time_t time0);返回两个time_t值的差值，并转换到双精度浮点类型来表示相差的秒数。
+
+### 调校时间
+- int adjtime(const struct timeval* delta, struct timeval* olddelta);指示内核使用增量delta来逐渐调整时间，然后返回0。如果delta指定的时间是正值，内核将加速系统时钟直到修正彻底完成。如果delta指定时间是负值，内核将减缓系统时钟直到修正完成。
+
+- int adjtimex(struct timex* adj);比adjtime)()采用的渐进调整方法更加强大和复杂的时钟调整算法。调用adjtimex()可以将内核中与时间相关的参数读取到adj指向的timex结构体中。系统调用可以选择性的根据该结构体的modes字段来额外设置某些参数。
+
+```C
+struct timex{
+  int modes;  //mode selector
+  long offset;  //time offset(usec)
+  long freq;  //frequency offset(scaled ppm)
+  long maxerror;  //maximum error(usec)
+  long esterror;  //estimated error(usec)
+  int status; //clock status
+  constant; //PLL time constant
+  long precision; //clock precision(usec)
+  long tolerance; //clock frequency tolerance
+  struct timeval time;  //current time
+  long tick;  //usecs between clock ticks
+};
+```
+
+modes字段由零或多个以下标志位按位或的结果：
+ADJ_OFFSET  通过offset设置时间偏移量
+ADJ_FREQUENCY 通过freq设置频率偏移量
+ADJ_MAXERROR  通过maxerror设置最大错误值
+ADJ_ESTERROR  通过esterror设置估计错误值
+ADJ_STATUS  通过status设置时钟状态
+ADJ_TIMECONST 通过constant设置锁相环时间常量
+ADJ_TICK  通过tick设置时钟计时信号量
+ADJ_OFFSET_SINGLESHOT 使用简单算法通过offset设置一次时间偏移量
+
+如果modes是0，就没有设置值。只有拥有CAP_SYS_TIME权限的用户才能给modes赋非零值；任何用户均可设置mode为0，从而取得所有参数，但不能设置任何值。
+
+### 睡眠和等待
+- unsigned int sleep(unsigned int seconds);该调用返回未睡眠的秒数。
+- void usleep(unsigned long usec);微秒级精度睡眠
+- int nanosleep(const struct timespec* req, struct timespec* rem);纳秒级精度的睡眠。如果睡眠被打断，且rem不是NULL，函数把剩余睡眠时间放到rem中。
+
+### 最高级睡眠函数
+- int clock_nanosleep(clockid_t clock_id, int flags, const struct timespec* req, struct timespec* rem);
+
+### 定时器
+定时器提供了在一定时间获取后通知进程的机制。定时器超时所需的时间叫做延迟(delay)，或者超时值(expiration)。
+
+#### 简单闹钟alarm
+- unsigned int alarm(unsigned int seconds);调用会在真实时间seconds秒之后将SIGALRM信号发给调用进程。如果先前的信号尚未处理，调用就取消该信号，并用新的来代替它，并返回先前的剩余秒数。如果seconds是0，就取消掉之前的信号，但不设置新的闹钟。
+
+#### 间歇定时器
+- int getitimer(int which, struct itimerval* value);
+- int setitimer(int which, const struct itimerval* value, struct itimerval* ovalue);
+
+间歇定时器和alarm()的操作方式相似，但它能够自动重启自身，并在以下三个独有的模式中之一下工作：
+- ITIMER_REAL 测量真实时间。当指定的真实时间过去后，内核将SIGALRM信号发给进程。
+- ITIMER_VIRTUAL  只在进程用户空间的代码执行时减少。当指定的进程时间过去后，内核将SIGVTALRM发给进程。
+- ITIMER_PROF 在进程执行以及内核为进程服务时(例如完成一个系统调用)都会减少。当指定的时间过去后，内核将SIGPROF信号发给进程。这个模式一般和ITIMER_VIRTUAL共用，这样程序就能衡量进程消耗的用户时间和内核时间。
+- ITIMER_REAL 衡量的时间和alarm()相同；另外两个模式对于剖析程序很有帮助。
+
+itimeval结构体允许用户在定时器过期或终止的时限，如果设定了值，则在过期后重启定时器：
+
+```C
+struct itimerval{
+  struct timeval it_interval; //next value
+  struct timeval it_value;  //current value
+};
+```
+
+#### 高级定时器
+- int timer_create(clockid_t clockid, struct sigevent* evp, timer_t* timerid);创建一个与POSIX时钟clockid相关联的定时器，在timerid中存储一个唯一的定时器标记，并返回0。
+
+```C
+struct sigevent{
+  union sigval sigev_value;
+  int sigev_signo;
+  int sigev_notify;
+  void (*sigev_notify_function)(union sigval);
+  pthread_attr_t* sigev_notify_attributes;
+};
+union sigval{
+  int sival_int;
+  void* sival_ptr;
+};
+```
+
+进程在定时器过期时的行为通过sigev_notify来指定，必须是以下三个值之一：
+- SIGEV_NONE  一个“空的”通知。
+- SIGEV_SIGNAL  当定时器到期时，内核给进程发送一个由sigev_signo指定的信号。在信号处理程序中，si_value被设置为sigev_value。
+- SIGEV_THREAD  当定时器到期时，内核产生一个新线程，并让其执行sigev_notify_function，将sigev_value作为它唯一的参数。该线程在这个函数返回时终止。如果sigev_notify_attributes不是NULL，pthread_attr_t结构体则定义了新线程的行为。
+
+#### 设置定时器
+- int timer_settime(time_t timerid, int flags, const struct itimerspec* value, struct itimerspec* ovalue);成功调用将设置timerid指定的定时器的过期时间为value。
+
+#### 取得定时器的过期时间
+- int timer_gettime(timer_t timerid, struct itimerspec* value);
+
+#### 取得定时器的超时值
+- int timer_getoverrun(timer_t timerid);返回定时器过期与实际定时器过期后通知进程间的多余时长。
+
+#### 删除定时器
+- int timer_delete(timer_t timerid);
