@@ -60,3 +60,8 @@
   2. 调用Base默认构造函数
   3. 把地址赋予b对象指针
 - free和delete函数仅仅把指针指向的内存释放掉了，然而指针还保存了该内存的地址。所以在释放掉之后，除非确定之后不会再去对该指针做任何操作，否则要记得把指针置NULL，防止后面操作的误判断。
+- 目前所有编译器对于virtual function的实现法都是使用各个class专属的virtual table，大小固定，并且在程序执行前就构造好了。
+- member functions虽然含在class的声明之内，却不出现在object之中。每一个non-inline member function只会诞生一个函数实体。至于每一个“拥有零个或一个定义”的inline function则会在其每一个使用者(模块)身上产生一个函数实体。
+- C++对象模型：Nonstatic data members被配置于每一个class object之内，static data members则被存放在所有的class object之外。Static和nonstatic function members也被放在所有的class object之外。virtual functions则以两个步骤支持：
+  1. 每一个class产生出一堆指向virtual functions的指针，放在表格之中。这个表格被称为virtual table(vtbl)。
+  2. 每一个class object被添加了一个指针，指向相关的virtual table。通常这个指针被称为vptr。vptr的设定(setting)和重置(resetting)都由每一个class的constructor、destructor和copy assignment运算符自动完成。每一个class所关联的type_info object(用以支持runtime type identification, RTTI)也经由virtual table被指出来，通常是放在表格的第一个slot处。
