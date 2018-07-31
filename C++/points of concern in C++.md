@@ -9,7 +9,9 @@
   eat(s); //错误
   ```
   如果类之间的继承关系是private，编译器不会自动将一个派生类对象转换为一个基类对象。
+
 - virtual继承会增加大小、速度、初始化(赋值)复杂度等等成本。如果virtual base classes不带任何数据(Java中的接口类-interface)，将是最具有实用价值的情况。
+
 - 当编译器开始解析template print2nd时，尚未确认C是什么东西。C++有个规则可以解析这一歧义状态：如果解析器在template中遭遇一个嵌套从属名称(C::const_iterator)，它便假设这名称不是个类型，除非你告诉它是。所以缺省情况下嵌套从属名称不是类型，而是被认为是C中的一个static成员变量。
   ```C++
   template<typename C>
@@ -37,7 +39,9 @@
     }
   };
   ```
+
 - 内联操作发送与预处理(预编译)阶段，即处理带“#”前缀的语句那个阶段。
+
 - 带有继承关系的B，D两类型分别具现化某个模板，产生出来的两个具现体并不带有继承关系。如下：
   Top <- Middle <- Bottom
   ```C++
@@ -53,15 +57,47 @@
   SmartPtr<const Top> pct2 = pt1;                   //非常量转换为常量
   ```
   以上都是不行的，如果把以上的模拟模板智能指针改成普通的指针倒是完全没问题。上面都是具现化SmartPtr模板，所以`SmartPtr<Top>`和`SmartPtr<Middle>`之间并没有什么继承关系，只是两个不相干的类而已，这就造成了看似派生类的对象却无法转换成基类对象的情况。
+
 - 在template实参推导过程中从不将隐式类型转换函数(non-explicit的构造函数)纳入考虑。
+
 - C++要求所有operator news(动态申请空间)返回的指针都有适当的对齐，如指针的地址必须是4的倍数或double的地址必须是8的倍数。如果没有奉行这个约束条件，可能导致运行期硬件异常。而在Intel x86体系结构上，若double是8字节对齐，其访问速度会快很多。但是编译器自带的operator new并不保证对动态分配而得的double采取8字节对齐。
+
 - `Base *b = new Base`这段代码的执行步骤如下：
   1. new申请空间
   2. 调用Base默认构造函数
   3. 把地址赋予b对象指针
+
 - free和delete函数仅仅把指针指向的内存释放掉了，然而指针还保存了该内存的地址。所以在释放掉之后，除非确定之后不会再去对该指针做任何操作，否则要记得把指针置NULL，防止后面操作的误判断。
+
 - 目前所有编译器对于virtual function的实现法都是使用各个class专属的virtual table，大小固定，并且在程序执行前就构造好了。
+
 - member functions虽然含在class的声明之内，却不出现在object之中。每一个non-inline member function只会诞生一个函数实体。至于每一个“拥有零个或一个定义”的inline function则会在其每一个使用者(模块)身上产生一个函数实体。
+
 - C++对象模型：Nonstatic data members被配置于每一个class object之内，static data members则被存放在所有的class object之外。Static和nonstatic function members也被放在所有的class object之外。virtual functions则以两个步骤支持：
   1. 每一个class产生出一堆指向virtual functions的指针，放在表格之中。这个表格被称为virtual table(vtbl)。
   2. 每一个class object被添加了一个指针，指向相关的virtual table。通常这个指针被称为vptr。vptr的设定(setting)和重置(resetting)都由每一个class的constructor、destructor和copy assignment运算符自动完成。每一个class所关联的type_info object(用以支持runtime type identification, RTTI)也经由virtual table被指出来，通常是放在表格的第一个slot处。
+
+- 什么情况下编译器会合成“有用的默认构造函数”：
+  1. “带有Default Constructor”的Member Class Object的类，即类A与另一个带有Default Constructor的类组合，那么类A如果没有其他构造函数，编译器就会合成默认构造函数，在该函数中调用另一个类的默认构造函数。如果类A有构造函数，那么“调用代码”会被安插到已有的所有构造函数最开头处。
+  2. “带有Default Constructor”的Base Class的类，同上。
+  3. “带有一个Virtual Function”的Class的类，若该类没有构造函数，编译器会合成默认构造函数，不但执行上面**1**的操作，还会加上初始化一个隐式的vptr的操作，该vptr是指向vtbl的。
+  4. “带有一个Virtual Base Class”的Class的类。<br/><br/>
+  至于没有存在那四种情况而又没有声明任何constructor的classes，我们说它们拥有的是implicit trivial default constructors(隐式无用默认构造函数)，它们实际上并不会被合成出来。
+
+- 构造函数的成员初始化列表
+  - 必须使用成员初始化列表的情况：
+    1. 当初始化一个reference member时
+    2. 当初始化一个const member时
+    3. 当调用一个base class的constructor，而它拥有一组参数时
+    4. 当调用一个member class的constructor，而它拥有一组参数时
+
+- 即使只是一个空的class(没有成员变量)，编译器也会为其插入一个char(1 byte)，为的是在内存中占到一个独一无二的地址。
+```C++
+class X{};
+class Y : public virtual X{};
+class Z : public virtual X{};
+class A : public Y, public Z{};
+```
+这三个的通过sizeof得出的结果分别为1、8、8、16。造成Y、Z、A这样的大小，其中有地址对齐和特定编译器的原因。
+
+- static data members被放置在程序的一个global data segment中，不会影响个别的class object的大小。
