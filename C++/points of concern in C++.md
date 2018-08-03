@@ -92,12 +92,39 @@
     4. 当调用一个member class的constructor，而它拥有一组参数时
 
 - 即使只是一个空的class(没有成员变量)，编译器也会为其插入一个char(1 byte)，为的是在内存中占到一个独一无二的地址。
-```C++
-class X{};
-class Y : public virtual X{};
-class Z : public virtual X{};
-class A : public Y, public Z{};
-```
+  ```C++
+  class X{};
+  class Y : public virtual X{};
+  class Z : public virtual X{};
+  class A : public Y, public Z{};
+  ```
 这三个的通过sizeof得出的结果分别为1、8、8、16。造成Y、Z、A这样的大小，其中有地址对齐和特定编译器的原因。
 
 - static data members被放置在程序的一个global data segment中，不会影响个别的class object的大小。
+
+- nonstatic member function至少和一般的nonmember function有相同的效率。因为编译器内部已将"member函数实体"转换为对等的"nonmember函数实体"。
+
+- virtual function table会包含的函数地址：
+  - 这个class所定义的虚拟函数。它会改写(overriding)一个可能存在的base class virtual function函数实体
+  - 继承自base class的函数实体。这时在derived class决定不改写virtual function时才会出现的情况
+  - 一个pure_virtual_called()函数实体，它既可以扮演pure virtual function的空间保卫者角色，也可以当做执行期异常处理函数
+
+- 单一继承下，每一个拥有virtual function的class都会有它自个的virtual table，但是并不占用class object的大小。该class的每一个object都会有一个vptr。
+
+- 在多重继承之下，一个derived class内含n-1个**额外**的virtual tables，n表示其上一层base classes的数目(因此，单一继承将不会有额外的virtual tables)。针对每一个virtual tables，Derived对象中有对应的vptr。<br/>
+有一点细节要注意，对于像`class Derived : public Base1, public Base2{...}`这样的继承，Derived会有两个vptr分别指向不同的vtbl，对于Base1的vptr，其指向的vtbl，内含的virtual function可不止Base1的，其中还有Base2的；而Base2的vptr则只有Base2的。<br/>
+当然，以上只是其中一种实现方法，不同编译器可能就不同。比如有一种是把所有vtbl都连成一块，然后Base2的vptr也只是一个offset而已，这是为了加速动态共享函数库的符号名称链接。
+
+- Constructor可能内带大量的隐藏码，因为编译器会扩充每一个constructor，扩充程度视class T的继承体系而定。一般而言编译器所做的扩充操作大约如下：
+  1. 记录在member initialization list中的data members初始化操作会被放进constructor的函数本身，并以members的声明顺序为顺序。
+  2. 如果有一个member并没有出现在member initialization list之中，但它有一个default constructor，那么该default constructor必须被调用。
+  3. 在那之前，如果class object有virtual table pointers(s)，它(们)必须被设定初值，指向适当的virtual table(s)。
+  4. 在那之前，所有上一层的base class constructors必须被调用，以base class的声明顺序为顺序(如果base class是多重继承下的第二或后继的base class，那么this指针必须有所调整)。
+  5. 在那之前，所有virtual base class constructors必须被调用，从左到右，从最深到最浅。
+
+- Destructor扩展顺序：
+  1. destructor的函数本身首先被执行
+  2. 如果class拥有member class objects，而后者拥有destructors，那么它们会以其声明顺序的相反顺序被调用
+  3. 如果object内带一个vptr，则现在被重新设定，指向适当的base class的virtual table
+  4. 如果有任何直接的(上一层)nonvirtual base classes拥有destructor，它们会以其声明顺序的相反顺序被调用
+  5. 如果有任何virtual base classes拥有destructor，而当前讨论的这个class是最尾端(most-derived)的class，那么它们会以其原来的构造顺序的相反顺序被调用
