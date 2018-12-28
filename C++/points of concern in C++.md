@@ -128,3 +128,13 @@
   3. 如果object内带一个vptr，则现在被重新设定，指向适当的base class的virtual table
   4. 如果有任何直接的(上一层)nonvirtual base classes拥有destructor，它们会以其声明顺序的相反顺序被调用
   5. 如果有任何virtual base classes拥有destructor，而当前讨论的这个class是最尾端(most-derived)的class，那么它们会以其原来的构造顺序的相反顺序被调用
+
+- 第一种情况是创建一个临时对象并返回它（直接在外部返回值的存储单元中）。
+
+  第二种则是发生三件事。首先创建tmp对象，其中包括构造函数的调用。然后拷贝构造函数把tmp拷贝到外部返回值的存储单元中。最后，当tmp在作用域的结尾时调用析构函数。
+  ```C++
+  return Integer(5);
+  // 虽然最后的结果一样，但实际上面与下面是不同的
+  Integer tmp(5);
+  return tmp;
+  ```
